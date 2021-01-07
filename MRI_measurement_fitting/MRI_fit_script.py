@@ -105,7 +105,7 @@ def MRI_wrapper(params, positions, measured_norm, profile_type):
 ###################
 
 #name of file containing measurement data (needs to be in folder "script_input"!)
-file_name = "ZJ7Cs05"
+file_name = "name-of-your-data-file"
 file_extension = ".dat"
 input_name = "script_input/" + file_name + file_extension
 
