@@ -1,3 +1,6 @@
+#Code for calculating volume flow through an arbitrarily shaped channel with finite element method
+#Obviously the shape needs to be defined first through the pygmsh interface - a potentially rather laborious task
+
 import pygmsh
 import meshio
 import numpy
