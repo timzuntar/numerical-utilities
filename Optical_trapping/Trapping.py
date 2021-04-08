@@ -2,11 +2,11 @@ import cmath
 import math
 import numpy as np
 import random
-from scipy import constants, special
+from scipy import constants, special, fft, optimize
 
 def IntensityGradient(vector, I0, z0, w0, onedim=False):
     #computes the field intensity and gradients of a Gaussian beam with waist at (0,0,0)
-    #and propagating along the positive z-axis.
+    #and propagating along the positive z-axis direction.
 
     temp1 = (1 + (vector[2]/z0)**2)
     w2 = (w0**2) * temp1
@@ -32,11 +32,11 @@ def RayleighLimitEval(vector, I0, z0, w0, n0, n1, wavelength, radius, onedim=Fal
     #evaluates gradient and scattering forces of a homogeneous spherical particle in said Gaussian beam,
     #in the Rayleigh approximation
 
-    k = 2 * math.pi / wavelength
+    k = 2 * n0 * math.pi / wavelength
     refractive_term = ((n1/n0)**2 - 1) / ((n1/n0)**2 + 2)
     I, gradient = IntensityGradient(vector, I0, z0, w0, onedim)
-    gradient_term = refractive_term * 2 * math.pi * n1 * (radius**3) / constants.c
-    scattering_term = refractive_term**2 * 8 * math.pi * n1 * (k**4) * (radius**6) / (3 * constants.c)
+    gradient_term = refractive_term * 2 * math.pi * n0 * (radius**3) / constants.c
+    scattering_term = refractive_term**2 * 8 * math.pi * n0 * (k**4) * (radius**6) / (3 * constants.c)
     
     Fgrad = [-gradient_term * gradient[0], -gradient_term * gradient[1], -gradient_term * gradient[2]]
     Fscat = [0, 0, -scattering_term * I]
@@ -50,9 +50,12 @@ def UpdatePosition(vector, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rh
     #assuming gravity acts along z-axis
     Fg = [0, 0, 4 * math.pi * constants.g * (radius**3) * (rhomedium - rhoparticle)]
     noise = [random.normalvariate(0.0,1.0),random.normalvariate(0.0,1.0),random.normalvariate(0.0,1.0)]
-    F = [Fgrad[0] + Fscat[0] + Fg[0], Fgrad[1] + Fscat[1] + Fg[1], Fgrad[2] + Fscat[2] + Fg[2]]
-
-    dr = [-dt*F[0]/D + noise[0]*Brownconst, -dt*F[1]/D + noise[1]*Brownconst, -dt*F[2]/D + noise[2]*Brownconst]
+    if (onedim == False):
+        F = [Fgrad[0] + Fscat[0] + Fg[0], Fgrad[1] + Fscat[1] + Fg[1], Fgrad[2] + Fscat[2] + Fg[2]]
+        dr = [-dt*F[0]/D + noise[0]*Brownconst, -dt*F[1]/D + noise[1]*Brownconst, -dt*F[2]/D + noise[2]*Brownconst]
+    else:
+        F = [0,0,Fgrad[2] + Fscat[2] + Fg[2]]
+        dr = [0,0,-dt*F[2]/D + noise[2]*Brownconst]
 
     return F, dr
 
@@ -67,9 +70,9 @@ def ShapeCoeffs(l, zoffset, w0, n0, wavelength):
     #Only 1 distinct value in this edge case - function returns two values for future compatibility
 
     s_i = wavelength / (n0 * 2 * math.pi * w0)
-    gl = cmath.exp(-1j * n0 * zoffset * 2 * math.pi / wavelength)
-    gl *= cmath.exp(-(s_i**2) * (l+2) * (l-1) / (1 - 1j * 2 * s_i * zoffset / w0))
-    gl /= (1 - 1j * 2 * s_i * zoffset / w0)
+    gl = np.exp(np.complex(0, -n0 * zoffset * 2 * math.pi / wavelength))
+    gl *= np.exp(-(s_i**2) * (l+2) * (l-1) / np.complex(1, -2 * s_i * zoffset / w0))
+    gl /= np.complex(1,-2 * s_i * zoffset / w0)
 
     return gl, gl
 
@@ -124,7 +127,20 @@ def LorenzMieEval(I0, zoffset, w0, n0, n1, wavelength, radius, lmax):
     for l in range(1,lmax+1):
         coeffsum += LorenzMieTerm(l,zoffset,w0, n0, n1, wavelength, radius)
 
-    return [0,0,np.real(I0 * wavelength**2 / (4 * math.pi * (constants.c)**2 * constants.mu_0) * coeffsum) * (constants.c * constants.mu_0 / n0)]
+    #testing of Rayleigh approx. equivalency
+    #gl, hl = ShapeCoeffs(1,zoffset,w0,n0,wavelength)
+    #glplus, hlplus = ShapeCoeffs(2,zoffset,w0,n0,wavelength)
+    #al, bl = ScatteringAmplitudes(1,n0,n1,wavelength,radius)
+    #X = n0 * radius * 2 * math.pi / wavelength
+    #m = n1/n0
+    #s_i = wavelength / (n0 * 2 * math.pi * w0)
+    #al = np.complex(0,-2.0/3) * (X**3) * ((m**2-1)/(m**2+2))
+    #al -= np.complex(0,2.0/5) * (X**5) * (m**2-1) * (m**2-2) / ((m**2+2)**2)
+    #al += np.complex((4.0/9) * (X**6) * (((m**2-1)/(m**2+2))**2),0)
+
+    #coeffsum = 1.5 * (gl * np.conj(glplus) * al + np.conj(gl) * glplus * np.conj(al) + gl * np.conj(hl) * al + np.conj(gl) * hl * np.conj(al))
+
+    return [0,0,np.real(I0 * (wavelength**2 / (4 * math.pi * (constants.c)**2 * constants.mu_0)) * coeffsum) * (constants.c * constants.mu_0 / n0)]
 
 def UpdatePositionLM(vector, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax):
     #propagates equation of motion one timestep for LM axial model.
@@ -198,11 +214,13 @@ def AnnulusPowerGauss(philower, phiupper, I0, z0, w0, z):
 def AnnulusPower(philower, phiupper, I0, z0, w0, z):
     #Fraction of beam power contained in annulus between the two angles at distance z from waist (for ray optics approx.)
 
-    r1 = z / (math.pi/2 - math.atan(philower))
-    r2 = z / (math.pi/2 - math.atan(phiupper))
+    #r1 = z / (math.pi/2 - math.atan(philower))
+    #r2 = z / (math.pi/2 - math.atan(phiupper))
+    r1 = z * math.tan(philower)
+    r2 = z * math.tan(phiupper)
     w2 = w0**2 * ((z/z0)**2)
 
-    return (math.pi * I0 * w0 / 2) * (math.exp(- 2 * (r1**2) / w2) - math.exp(- 2 * (r2**2) / w2))
+    return (math.pi * I0 * (w0**2) / 2) * (math.exp(- 2 * (r1**2) / w2) - math.exp(- 2 * (r2**2) / w2))
 
 
 def RayOpticsEval(I0, zoffset, w0, n0, n1, wavelength, radius, nphi):
@@ -211,7 +229,7 @@ def RayOpticsEval(I0, zoffset, w0, n0, n1, wavelength, radius, nphi):
 
     divangle = wavelength / (math.pi * w0)
     if (math.fabs(zoffset) / radius <= 1.0):
-        phimax = 4*divangle
+        phimax = min(4*divangle,math.pi/2)
     else:
         phimax = min(4*divangle, math.asin(radius / math.fabs(zoffset)))
     #write down central angles of each ray annulus (relative to waist)
@@ -260,7 +278,7 @@ def zForceSlice(zstart,zend,numz,I0,z0,w0,n0,n1,wavelength,radius,lmax,nphi):
     ipathologic = []
     for i in range(numz):
         z = zstart + i*dz
-        if (math.fabs(z) < 1e-9):
+        if (math.fabs(z) < 1e-10):
             ipathologic.append(i)
             continue
         else:
@@ -270,8 +288,8 @@ def zForceSlice(zstart,zend,numz,I0,z0,w0,n0,n1,wavelength,radius,lmax,nphi):
             RayF = RayOpticsEval(I0,z,w0,n0,n1,wavelength,radius,nphi)
             data[i,1] = RayleighFgrad[2]
             data[i,2] = RayleighFscat[2]
-            data[i,3] = RayF[0]
-            data[i,4] = RayF[1]
+            data[i,3] = LMF[2]
+            data[i,4] = RayF[2]
         
     return np.delete(data, ipathologic, axis=0)
 
@@ -284,7 +302,7 @@ def zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,fol
     if (method=="Rayleigh"):
         f = open(folder+"zeros_Rayleigh_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"w+")
     elif (method=="LM"):
-        f = open(folder+"zeros_LM_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"w+")
+        f = open(folder+"zeros_LM_a_%.2f_um_n0_%.2f_n1_%.2f_append.dat" % (radius*1e6,n0,n1),"w+")
     elif (method=="Ray"):
         f = open(folder+"zeros_Ray_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"w+")
     else:
@@ -295,78 +313,120 @@ def zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,fol
 
         if (method=="Rayleigh"):
             RayleighFgrad, RayleighFscat = RayleighLimitEval([0,0,zstart],I0,z0,w0,n0,n1,wavelength,radius,onedim=True)
-            Fprev = RayleighFgrad+RayleighFscat
+            Fprev = RayleighFgrad[2]+RayleighFscat[2]
         elif (method=="LM"):
-            Fprev = LorenzMieEval(I0,zstart,w0,n0,n1,wavelength,radius,lmax)
+            Ftemp = LorenzMieEval(I0,zstart,w0,n0,n1,wavelength,radius,lmax)
+            Fprev = Ftemp[2]
         elif (method=="Ray"):
-            Fprev = RayOpticsEval(I0,zstart,w0,n0,n1,wavelength,radius,nphi)
+            Ftemp = RayOpticsEval(I0,zstart,w0,n0,n1,wavelength,radius,nphi)
+            Fprev = Ftemp[2]
 
-        maxF = Fprev[2]
-        minF = Fprev[2]
+        maxF = Fprev
+        minF = Fprev
         f.write("%.5e %.5e " % (radius,w0))
         ipathologic = []
         for i in range(1,numz):
             z = zstart + i*dz
-            if (math.fabs(z) < 1e-9):
+            if (math.fabs(z) < 1e-10):
                 ipathologic.append(i)
                 continue
             else:
                 if (method=="Rayleigh"):
                     RayleighFgrad, RayleighFscat = RayleighLimitEval([0,0,z],I0,z0,w0,n0,n1,wavelength,radius,onedim=True)
-                    Fcurrent = RayleighFgrad+RayleighFscat
+                    Fcurrent = RayleighFgrad[2]+RayleighFscat[2]
                 elif (method=="LM"):
-                    Fcurrent = LorenzMieEval(I0,z,w0,n0,n1,wavelength,radius,lmax)
+                    Ftemp = LorenzMieEval(I0,z,w0,n0,n1,wavelength,radius,lmax)
+                    Fcurrent = Ftemp[2]
                 elif (method=="Ray"):
-                    Fcurrent = RayOpticsEval(I0,z,w0,n0,n1,wavelength,radius,nphi)
+                    Ftemp = RayOpticsEval(I0,z,w0,n0,n1,wavelength,radius,nphi)
+                    Fcurrent = Ftemp[2]
                 
-                if (Fcurrent[2] > maxF):
-                    maxF = Fcurrent[2]
-                if (Fcurrent[2] < minF):
-                    minF = Fcurrent[2]
-                if ((Fprev[2] > 0 and Fcurrent[2] < 0) or (Fprev[2] < 0 and Fcurrent[2] > 0)):
-                    f.write("%f " % ((2*z-dz)/2))
+                if (Fcurrent > maxF):
+                    maxF = Fcurrent
+                elif (Fcurrent < minF):
+                    minF = Fcurrent
+                if ((Fprev > 0 and Fcurrent < 0) or (Fprev < 0 and Fcurrent > 0)):
+                    f.write("%.5e " % ((2*z-dz)/2))
                 Fprev = Fcurrent
         
         f.write("%.10e %.10e\n" % (maxF,minF))
+        print("w0 = %e" % (w0))
 
     f.close()
     return True
 
+def simFT(dt,zlist,T):
+    n = len(zlist)
+    zFT = np.real(fft.rfft(zlist))
+    zFT = np.square(zFT)
+    freqs = fft.rfftfreq(n,dt)
+
+    popt,_ = optimize.curve_fit(transferfunction,freqs,zFT,[100.0,zFT[0]],method="lm")
+    trapcoeff = 2.0*constants.Boltzmann*T*popt[0]/(math.pi*popt[1])
+
+    return freqs,zFT,popt[0],popt[1],trapcoeff
+
+def SimAveraging(dt,n,zaveraged,T):
+    freqs = fft.rfftfreq(n,dt)
+    popt,_ = optimize.curve_fit(transferfunction,freqs,zaveraged,[50.0,zaveraged[0]],method="lm")
+    trapcoeff = 2.0*constants.Boltzmann*T*popt[0]/(math.pi*popt[1])
+
+    return freqs,popt[0],popt[1],trapcoeff
+
+def transferfunction(omega,omega0,Sconst):
+    return Sconst/(omega**2 + omega0**2)
+
+def GaussianE(x,z0, w0, n0, n1, wavelength):
+    #returns electric field strength (divided by E0) for Gaussian beam and the weakly confined beam approximation formula by Lock (2004)
+    
+    s_i = wavelength / (n0 * 2 * math.pi * w0)
+    D = 1.0/np.complex(1,2*s_i*x/w0)
+    E_approx = D*np.exp(np.complex(0,n0*2*math.pi*x/wavelength))
+    eta = math.atan(x/z0)
+    w2 = (w0**2) * (1 + (x/z0)**2)
+    E_exact = (w0/math.sqrt(w2)) * np.exp(np.complex(0,2*math.pi*n0*x/wavelength)) * np.exp(np.complex(0,eta))
+    
+    #return np.real(E_exact), np.imag(E_exact) ,np.real(E_approx), np.imag(E_approx)
+    return np.real(E_exact * np.conj(E_exact)), np.imag(E_exact) ,np.real(E_approx * np.conj(E_approx)), np.imag(E_approx)
 
 #material parameters
-radius = 5e-6         #particle diameter is 100 nm
+radius = 10e-6         #particle diameter is 100 nm
 eta = 8.9e-4            #dynamic viscosity of water at 25C
 T = 298
 n0 = 1.33               #refractive index of surrounding medium
 n1 = 1.5                #refractive index of particle
 rhomedium = 1           #water
-rhoparticle = 2.65      #silica
+rhoparticle = 2.65      #silica 
 
 #beam parameters
 wavelength = 1064e-9    #standard infrared Nd:YAG
-w0 = 0.1e-6             #beam waist of 1 micron diameter
-z0 = math.pi * (w0**2) / wavelength
+w0 = 0.5e-6             #beam waist radius
+z0 = math.pi * (w0**2) * n0 / wavelength
+#P = 0.0
 P = 0.1                 #100 mW
-I0 = 2*P/(math.pi * w0**2)
-#I0 = 3e12               #approximately 80 mW power for chosen w0
+#P = 1e-6             #for ray optics
+I0 = 2*P/(math.pi * (w0**2))
+#I0 = 3e12               #approximately 80 mW power for 0.5 micron waist
 #I0 = 0.0                #test code validity without beam
 
 #simulation parameters
-dt = 1e-4
-tmax = 1.0
-lmax = 10
-nphi = 100
-random.seed(1)          #if we wish for Brownian motion to be repeatable
+dt = 1e-3
+tmax = 10.0
+FourierNreps = 10
+lmax = 200
+nphi = 75
+#random.seed(1)          #if we wish for Brownian motion to be repeatable
 
 D = 6 * math.pi * eta * radius
 Brownconst = math.sqrt(2 * constants.Boltzmann * T * dt / D)
 momentum = n1 * constants.h / wavelength
 
-
-""" r0 = [1e-6,0.0,2e-6]
+#Simulation and their Fourier transforms
+r0 = [0.0,0.0,0e-6]
 F = [0.0,0.0,0.0]
 
-multipliers = open("Rezultati/Rayleigh_beam_test_dt_%.2e.dat" % (dt),"w+")
+""" #Rayleigh
+multipliers = open("Rezultati/Rayleigh_P2e-2_dt_%.2e.dat" % (dt),"w+")
 multipliers.write(f"# radius {radius:.3e} eta {eta:.2e} T {T:d} n0 {n0:.2f} n1 {n1:.2f} rhomedium {rhomedium:.2f} rhoparticle {rhoparticle:.2f}\n")
 multipliers.write(f"# lambda {wavelength:.4e} w0 {w0:.2e} z0 {z0:.3e} I0 {I0:.2e}\n\n")
 
@@ -375,40 +435,35 @@ r = r0
 
 while(t < tmax):
     multipliers.write(f"{t:.5f} {r[0]:.12f} {r[1]:.12f} {r[2]:.12f} {F[0]:.6e} {F[1]:.6e} {F[2]:.6e}\n")
-    F, dr = UpdatePosition(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt)
+    F, dr = UpdatePosition(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt,onedim=True)
     r = np.add(r,dr)
     t += dt
-
 multipliers.close() """
 
-
-""" multipliers = open("Rezultati/LM_beam_test_dt_%.2e.dat" % (dt),"w+")
+""" #LM
+multipliers = open("Rezultati/LM_P4e-2_dt_%.2e.dat" % (dt),"w+")
 multipliers.write(f"# radius {radius:.3e} eta {eta:.2e} T {T:d} n0 {n0:.2f} n1 {n1:.2f} rhomedium {rhomedium:.2f} rhoparticle {rhoparticle:.2f}\n")
 multipliers.write(f"# lambda {wavelength:.4e} w0 {w0:.2e} z0 {z0:.3e} I0 {I0:.2e}\n\n")
 
 t = 0.0
-r = [0,0,0]
-tmax = 0.5
-F = [0.0,0.0,0.0]
+r = r0
 
 while(t < tmax):
     multipliers.write(f"{t:.5f} {r[2]:.12f} {F[2]:.6e}\n")
     F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax)
     r = np.add(r,dr)
     t += dt
-    print("%.4f" % (t))
-
 multipliers.close() """
 
 
-""" multipliers = open("Rezultati/Rayoptics_beam_test_dt_%.2e.dat" % (dt),"w+")
+""" #ray optics approx.
+multipliers = open("Rezultati/Rayoptics_P1e-7_dt_%.2e.dat" % (dt),"w+")
 multipliers.write(f"# radius {radius:.3e} eta {eta:.2e} T {T:d} n0 {n0:.2f} n1 {n1:.2f} rhomedium {rhomedium:.2f} rhoparticle {rhoparticle:.2f}\n")
 multipliers.write(f"# lambda {wavelength:.4e} w0 {w0:.2e} z0 {z0:.3e} I0 {I0:.2e}\n\n")
+fileslice = open("Rezultati/zslice_comparison_a_%.2f_um_waist_%.2f_um_.dat" % (radius*1e6,w0*1e6),"w+")
 
 t = 0.0
-r = [0,0,1e-6]
-tmax = 0.5
-F = [0.0,0.0,0.0]
+r = r0
 
 while(t < tmax):
     multipliers.write(f"{t:.5f} {r[2]:.12f} {F[2]:.6e}\n")
@@ -419,11 +474,88 @@ while(t < tmax):
 
 multipliers.close() """
 
+#FT for all approaches
+""" t = 0.0
+r = r0
+zpositions = []
+#1st run is separate
+while(t < tmax):
+    #F, dr = UpdatePosition(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt,onedim=True)
+    F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax)
+    #F, dr = UpdatePositionRayOptics(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, nphi)
+    r = np.add(r,dr)
+    if (t > 0.2*tmax):  #"burn-in" to make sure particle starts out near equilibrium position 
+        zpositions.append(r[2])
+    t += dt
+
+n = len(zpositions)
+print("n = %d" % (n))
+zFT = np.real(fft.rfft(zpositions))
+zFT = np.square(zFT)
+
+#remaining runs
+for i in range(1,FourierNreps):
+    print("Simulating repetition %d" % (i))
+    t = 0.0
+    r = r0
+    zrep = []
+    while(t < tmax):
+        #F, dr = UpdatePosition(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt,onedim=True)
+        F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax)
+        #F, dr = UpdatePositionRayOptics(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, nphi)
+        r = np.add(r,dr)
+        if (t > 0.2*tmax):
+            zrep.append(r[2])
+        t += dt
+    FTpart = np.real(fft.rfft(zpositions))
+    FTpart = np.square(FTpart)
+    zFT = np.add(zFT,FTpart) """
+
+""" zFT = np.true_divide(zFT,FourierNreps)
+freqs,omega0,Sconst,trapcoeff = SimAveraging(dt,n,zFT,T)
+print("omega_0 = %f, k_z = %e" % (omega0,trapcoeff))
+
+fourierresults = open("Rezultati/rayoptics_FT.dat","a+")
+fourierresults.write("%e %f %d %f %e\n" % (dt, tmax, FourierNreps, math.fabs(omega0), math.fabs(trapcoeff)))
+fourierresults.close()
+
+fourier = open("Rezultati/rayoptics_dt_%.2e_1dim_FT.dat" % (dt),"w+")
+for i in range(len(freqs)):
+    fourier.write("%f %.10e %.10e\n" % (freqs[i],zFT[i],transferfunction(freqs[i],omega0,Sconst)))
+fourier.close() """
+
+""" zFT = np.true_divide(zFT,FourierNreps)
+freqs = fft.rfftfreq(n,dt)
+fourier = open("Rezultati/LM_dt_%.2e_radius_%.2e_w0_%.2e_1dim_FT.dat" % (dt,radius,w0),"w+")
+for i in range(len(freqs)):
+    fourier.write("%f %.10e\n" % (freqs[i],zFT[i]))
+fourier.close() """
+
+#fit transforms post facto (doesn' work for some reason?)
+""" data = np.loadtxt("Rezultati/rayoptics_P1e-6_dt_1.00e-04_1dim_FT_single.dat")
+zFT = data[0:8000,1]
+freqs = data[0:8000,0]
+print(np.shape(zFT),np.shape(freqs))
+n = len(zFT)
+popt,_ = optimize.curve_fit(transferfunction,freqs,zFT,[20.0,1.2e-6],method="lm")
+trapcoeff = 2.0*constants.Boltzmann*T*popt[0]/(math.pi*popt[1])
+print("omega_0 = %f, k_z = %e" % (popt[0],trapcoeff))
+
+fourier = open("Rezultati/rayoptics_dt_%.2e_1dim_FT.dat" % (dt),"w+")
+for i in range(len(freqs)):
+    fourier.write("%f %.10e %.10e\n" % (freqs[i],zFT[i],transferfunction(freqs[i],popt[0],popt[1])))
+fourier.close() """
+
+""" popt = [7.75918,1.47463e-08]
+popterror = [0.04648,0.07376] #relative error
+trapcoeff = 2.0*constants.Boltzmann*T*popt[0]/(math.pi*popt[1])
+uncertainty = trapcoeff * (popterror[0]+popterror[1])
+print("%.6e %.6e" % (trapcoeff,uncertainty)) """
 
 #Here we generate force profiles along the z-axis in a sample trap for all 3 approaches.
-zstart = -50e-6
-zend = 50e-6
-numz = 2001
+zstart = -100e-6
+zend = 100e-6
+numz = 5001
 
 forces = zForceSlice(zstart,zend,numz,I0,z0,w0,n0,n1,wavelength,radius,lmax,nphi)
 fileslice = open("Rezultati/zslice_comparison_a_%.2f_um_waist_%.2f_um.dat" % (radius*1e6,w0*1e6),"w+")
@@ -431,30 +563,114 @@ fileslice.write(f"# radius {radius:.3e} I0 {I0:.5f} n0 {n0:.2f} n1 {n1:.2f} LM: 
 np.savetxt(fileslice, forces)
 fileslice.close()
 
+#checks locations of equilibria for a range of waist diameters
+""" wlist = []
+for w in range(30,50):
+    wlist.append(w*0.1*1e-6)
+zstart = -100e-6
+zend = 100e-6
+numz = 5001
+zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,"Rezultati/","Ray") """
+
+###################################
+#testing functions below this point
+###################################
+
+""" fileEfield = open("Rezultati/Gaussianbeamfieldcomp.dat","w+")
+for i in range(-5000,5001):
+    Eexactreal,Eexactimag,Eapproxreal,Eapproximag = GaussianE(i*1e-8,z0, w0, n0, n1, wavelength)
+    fileEfield.write("%.12f %.10e %.10e %.10e %.10e\n" % (i*1e-8,Eexactreal,Eexactimag,Eapproxreal,Eapproximag))
+fileEfield.close() """
+
+#Force components of single incoming ray
 """ filesingleray = open("Rezultati/single_ray_n1_%.2f_n0_%.2f.dat" % (n1,n0),"w+")
 for i in range(0,181):
     Fz,Fy = SingleRayForce(math.radians(i/2),n0,n1,1.0)
     filesingleray.write("%f %.10e %.10e\n" % (i/2,Fz,Fy))
 filesingleray.close() """
 
-""" wlist = []
-for w in range(1,1000):
-    wlist.append(w*0.01*1e-6)
-zstart = -5e-6
-zend = 5e-6
-numz = 10000
-zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,"Rezultati/","LM") """
-
-""" #Sanity check of annulus coordinate function
-zstart = -1.4e-6
-zend = 1.5e-6
+#Check of field gradient
+""" zstart = -10e-6
+zend = 10e-6
 numz = 2000
+r = 0.4e-6
+dz = (zend-zstart)/numz
+filegradtest = open("Rezultati/beam_intensity_gradient_w0_%.3f_radial_%.3f.dat" % (w0*1e6,r*1e6),"w+")
+filegradtest.write(f"# radius {radius:.4e} w0 {w0:.2e}\n\n")
+for i in range(numz):
+    I,grad = IntensityGradient([r,0,zstart+i*dz], I0, z0, w0, onedim=False)
+    filegradtest.write("%e %e %e %e %e\n" % (zstart+i*dz, I, grad[0],grad[1],grad[2]))
+filegradtest.close() """
+
+#Check of annular power distribution
+""" z = 1e-6
+
+divangle = wavelength / (math.pi * w0)
+if (math.fabs(z) / radius <= 1.0):
+    phimax = min(4*divangle,math.pi/2)
+else:
+    phimax = min(4*divangle, math.asin(radius / math.fabs(z)))
+philist = []
+for i in range(0,nphi):
+    philist.append((i+0.5) * phimax/nphi)
+P = 0.0
+powerdistrotest = open("Rezultati/Annulus_dP_w0_%.3f_z_%.3f.dat" % (w0*1e6,z*1e6),"w+")
+for i in range(nphi):
+    u, theta, vartheta, zannulus = AnnulusCoords(z, radius, w0, philist[i])
+    dP = AnnulusPower(philist[i] - 0.5 * phimax/nphi , philist[i] + 0.5 * phimax/nphi, I0, z0, w0, zannulus)
+    P += dP
+    powerdistrotest.write("%.10f %e %e %e %e\n" % (philist[i], dP, P,z / (math.pi/2 - math.atan(philist[i] - 0.5 * phimax/nphi)),z / (math.pi/2 - math.atan(philist[i] + 0.5 * phimax/nphi))))
+powerdistrotest.close() """
+
+#Check of annulus coordinate function
+""" zstart = -7e-6
+zend = 7e-6
+numz = 1001
 dz = (zend-zstart)/numz
 divangle = wavelength / (math.pi * w0)
 print(divangle)
-fileannulustest = open("Rezultati/raytest.dat","w+")
+fileannulustest = open("Rezultati/raytest_largeparticle.dat","w+")
 fileannulustest.write(f"# radius {radius:.4e} w0 {w0:.2e}\n\n")
 for i in range(numz):
     u,theta,vartheta,z = AnnulusCoords(zstart+i*dz, radius, w0, divangle)
     fileannulustest.write("%e %e %e %e %e\n" % (zstart+i*dz,u,theta,vartheta,z))
 fileannulustest.close() """
+
+#Check of angular force distribution
+""" nphi = 5
+zoffset = -radius*2.0
+divangle = wavelength / (math.pi * w0)
+if (math.fabs(zoffset) / radius <= 1.0):
+    phimax = 4*divangle
+else:
+    phimax = min(4*divangle, math.asin(radius / math.fabs(zoffset)))
+#write down central angles of each ray annulus (relative to waist)
+philist = []
+for i in range(nphi):
+    philist.append((i+0.5) * phimax/nphi)
+
+fileannulusdisttest = open("Rezultati/annulus_power_distriution_w0_%.3f_radius_%.3f_offset_%.3f_n1_%2f_nphi_%d.dat" % (w0*1e6,radius*1e6,zoffset*1e6,n1,nphi),"w+")
+Fopt = 0.0
+for t in range(nphi):
+    u, theta, vartheta, zannulus = AnnulusCoords(zoffset, radius, w0, philist[t])
+    dP = AnnulusPower(philist[t] - 0.5 * phimax/nphi , philist[t] + 0.5 * phimax/nphi, I0, z0, w0, zannulus)
+    Fz, Fy = SingleRayForce(theta, n0, n1, dP)
+    if (zoffset < 0):
+        dFopt = Fz * math.cos(philist[t]) - Fy * math.sin(philist[t])
+        Fopt += dFopt
+    elif (zoffset >= 0):
+        dFopt = Fz * math.cos(philist[t]) + Fy * math.sin(philist[t])
+        Fopt += dFopt
+    fileannulusdisttest.write("%f %e %e %e %e\n" % (philist[t],Fz,Fy,dFopt,Fopt))
+fileannulusdisttest.close() """
+
+#Check of LM coefficients
+""" lmax = 100
+zoffset = -1e-6
+fileLMtest = open("Rezultati/LM_terms_distriution_w0_%.3f_radius_%.3f_offset_%.3f_n1_%2f.dat" % (w0*1e6,radius*1e6,zoffset*1e6,n1),"w+")
+coeffsum = 0.0
+for l in range(1,lmax+1):
+    coeff = LorenzMieTerm(l,zoffset,w0, n0, n1, wavelength, radius)
+    coeffsum += coeff
+    fileLMtest.write("%d %e %e %e\n" % (l,np.real(coeff),np.imag(coeff),np.real(coeffsum)))
+fileLMtest.close() """
