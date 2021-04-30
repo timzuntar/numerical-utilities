@@ -2,7 +2,7 @@ import cmath
 import math
 import numpy as np
 import random
-from scipy import constants, special, fft, optimize
+from scipy import constants, special, fft, optimize, integrate, signal
 
 def IntensityGradient(vector, I0, z0, w0, onedim=False):
     #computes the field intensity and gradients of a Gaussian beam with waist at (0,0,0)
@@ -39,7 +39,7 @@ def RayleighLimitEval(vector, I0, z0, w0, n0, n1, wavelength, radius, onedim=Fal
     scattering_term = refractive_term**2 * 8 * math.pi * n0 * (k**4) * (radius**6) / (3 * constants.c)
     
     Fgrad = [-gradient_term * gradient[0], -gradient_term * gradient[1], -gradient_term * gradient[2]]
-    Fscat = [0, 0, -scattering_term * I]
+    Fscat = [0, 0, scattering_term * I]
 
     return Fgrad, Fscat
 
@@ -88,6 +88,12 @@ def ScatteringAmplitudes(l, n0, n1, wavelength, radius):
 
     return al, bl
 
+def PrecomputeAmplitudes(lmax, n0, n1, wavelength, radius):
+    coeffs = np.zeros((lmax+1,2),dtype=np.complex)
+    for l in range(1,lmax+2):
+        coeffs[l-1,0],coeffs[l-1,1] = ScatteringAmplitudes(l,n0,n1,wavelength,radius)
+    return coeffs
+
 def RBZeta(l, X):
     #helper function to keep line length manageable, evaluates Ricatti-Bessel zeta function
     return X*(special.spherical_jn(l,X) + 1j * special.spherical_yn(l,X))
@@ -102,13 +108,19 @@ def RBZetaDv(l, X):
     temp2 = X * (special.spherical_jn(l,X,derivative=True) + 1j * special.spherical_yn(l,X,derivative=True))
     return temp1 + temp2
 
-def LorenzMieTerm(l, zoffset, w0, n0, n1, wavelength, radius):
+def LorenzMieTerm(l, zoffset, w0, n0, n1, wavelength, radius, precomputed=None):
     #Actually computes the coefficient sum (again, per Lock 2004)
 
     gl, hl = ShapeCoeffs(l,zoffset,w0,n0,wavelength)
     glplus, hlplus = ShapeCoeffs(l+1,zoffset,w0,n0,wavelength)
-    al, bl = ScatteringAmplitudes(l,n0,n1,wavelength,radius)
-    alplus, blplus = ScatteringAmplitudes(l+1,n0,n1,wavelength,radius)
+    if precomputed is not None:
+        al = precomputed[l-1,0]
+        bl = precomputed[l-1,1]
+        alplus = precomputed[l,0]
+        blplus = precomputed[l,1]
+    else:
+        al, bl = ScatteringAmplitudes(l,n0,n1,wavelength,radius)
+        alplus, blplus = ScatteringAmplitudes(l+1,n0,n1,wavelength,radius)
     Ul = al + np.conj(alplus) - 2 * al * np.conj(alplus)
     Vl = bl + np.conj(blplus) - 2 * bl * np.conj(blplus)
     Wl = al + np.conj(bl) - 2 * al * np.conj(bl)
@@ -119,13 +131,13 @@ def LorenzMieTerm(l, zoffset, w0, n0, n1, wavelength, radius):
     temp2 *= (2*l + 1)/(l * (l + 1))
     return temp1 + temp2
 
-def LorenzMieEval(I0, zoffset, w0, n0, n1, wavelength, radius, lmax):
+def LorenzMieEval(I0, zoffset, w0, n0, n1, wavelength, radius, lmax, precomputed=None):
     #computes optical force in z-direction for a homogeneous sphere positioned in the axis of a near-Gaussian beam.
     #Truncation at l=10 should give a decent approximation
 
     coeffsum = 0.0
     for l in range(1,lmax+1):
-        coeffsum += LorenzMieTerm(l,zoffset,w0, n0, n1, wavelength, radius)
+        coeffsum += LorenzMieTerm(l,zoffset,w0, n0, n1, wavelength, radius,precomputed)
 
     #testing of Rayleigh approx. equivalency
     #gl, hl = ShapeCoeffs(1,zoffset,w0,n0,wavelength)
@@ -142,10 +154,10 @@ def LorenzMieEval(I0, zoffset, w0, n0, n1, wavelength, radius, lmax):
 
     return [0,0,np.real(I0 * (wavelength**2 / (4 * math.pi * (constants.c)**2 * constants.mu_0)) * coeffsum) * (constants.c * constants.mu_0 / n0)]
 
-def UpdatePositionLM(vector, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax):
+def UpdatePositionLM(vector, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax, precomputed=None):
     #propagates equation of motion one timestep for LM axial model.
 
-    Fopt = LorenzMieEval(I0, vector[2], w0, n0, n1, wavelength, radius, lmax)
+    Fopt = LorenzMieEval(I0, vector[2], w0, n0, n1, wavelength, radius, lmax,precomputed)
     #assuming gravity acts along z-axis
     Fg = 4 * math.pi * constants.g * (radius**3) * (rhomedium - rhoparticle)
     noise = random.normalvariate(0.0,1.0)
@@ -204,12 +216,13 @@ def AnnulusCoords(zoffset, radius, w0, phi):
 
 def AnnulusPowerGauss(philower, phiupper, I0, z0, w0, z):
     #Fraction of beam power contained in annulus between the two angles at distance z from waist (for Gaussian beam)
+    #Check for errors?
 
     r1 = z / (math.pi/2 - math.atan(philower))
     r2 = z / (math.pi/2 - math.atan(phiupper))
     w2 = w0**2 * (1 + (z/z0)**2)
 
-    return (math.pi * I0 * w0 / 2) * (math.exp(- 2 * (r1**2) / w2) - math.exp(- 2 * (r2**2) / w2))
+    return (math.pi * I0 * (w0**2) / 2) * (math.exp(- 2 * (r1**2) / w2) - math.exp(- 2 * (r2**2) / w2))
 
 def AnnulusPower(philower, phiupper, I0, z0, w0, z):
     #Fraction of beam power contained in annulus between the two angles at distance z from waist (for ray optics approx.)
@@ -270,12 +283,14 @@ def UpdatePositionRayOptics(vector, I0, z0, w0, n0, n1, wavelength, radius, rhom
     return Fopt, dr
     
 def zForceSlice(zstart,zend,numz,I0,z0,w0,n0,n1,wavelength,radius,lmax,nphi):
-    #computes the z-axis force at equally spaced points in chosen interval.
+    #computes the z-axis force and its integral at equally spaced points in chosen interval.
     #Skips positions too close to beam waist to avoid accidental zero division
 
-    data = np.empty((numz,5))
+    data = np.empty((numz,8))
     dz = (zend-zstart)/numz
     ipathologic = []
+    coeffs = PrecomputeAmplitudes(lmax,n0,n1,wavelength,radius)
+
     for i in range(numz):
         z = zstart + i*dz
         if (math.fabs(z) < 1e-10):
@@ -284,48 +299,138 @@ def zForceSlice(zstart,zend,numz,I0,z0,w0,n0,n1,wavelength,radius,lmax,nphi):
         else:
             data[i,0] = z
             RayleighFgrad, RayleighFscat = RayleighLimitEval([0,0,z],I0,z0,w0,n0,n1,wavelength,radius,onedim=True)
-            LMF = LorenzMieEval(I0,z,w0,n0,n1,wavelength,radius,lmax)
+            LMF = LorenzMieEval(I0,z,w0,n0,n1,wavelength,radius,lmax,precomputed=coeffs)
             RayF = RayOpticsEval(I0,z,w0,n0,n1,wavelength,radius,nphi)
             data[i,1] = RayleighFgrad[2]
             data[i,2] = RayleighFscat[2]
             data[i,3] = LMF[2]
             data[i,4] = RayF[2]
-        
-    return np.delete(data, ipathologic, axis=0)
 
-def zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,folder="Rezultati/",method="Rayleigh"):
-    #calculates axial force profile for all beam waist values from list and approximate locations of zeros 
+    data = np.delete(data, ipathologic, axis=0)
+    newlength = np.shape(data)[0]
+    data[0,5] = 0.0
+    data[0,6] = 0.0
+    data[0,7] = 0.0
+    for i in range (1,newlength):
+        data[i,5] = integrate.simps(np.add(data[:i,1],data[:i,2]), data[:i,0])
+        data[i,6] = integrate.simps(data[:i,3], data[:i,0])
+        data[i,7] = integrate.simps(data[:i,4], data[:i,0])
+
+    return data
+
+def zParSlice(zstart,zend,numz,T,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,folder="Rezultati/",method="Rayleigh"):
+    #calculates axial force profiles and approximate locations of local minima 
     #writes everything to file
 
     dz = (zend-zstart)/numz
     
     if (method=="Rayleigh"):
-        f = open(folder+"zeros_Rayleigh_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"w+")
+        f = open(folder+"zeros_Rayleigh_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"a+")
+        fwells = open(folder+"welldepths_Rayleigh_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"a+")
     elif (method=="LM"):
-        f = open(folder+"zeros_LM_a_%.2f_um_n0_%.2f_n1_%.2f_append.dat" % (radius*1e6,n0,n1),"w+")
+        f = open(folder+"zeros_LM_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"a+")
+        fwells = open(folder+"welldepths_LM_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"a+")
+        #only valid for variation of beam waist, not radius!
+        coeffs = PrecomputeAmplitudes(lmax,n0,n1,wavelength,radius)
     elif (method=="Ray"):
-        f = open(folder+"zeros_Ray_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"w+")
+        f = open(folder+"zeros_Ray_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"a+")
+        fwells = open(folder+"welldepths_Ray_a_%.2f_um_n0_%.2f_n1_%.2f.dat" % (radius*1e6,n0,n1),"a+")
     else:
         return False
     
+    #compute axial forces for every value of parameter
     for w0 in wlist:
-        z0 = math.pi * (w0**2) / wavelength
+        z0 = math.pi * (w0**2) * n0 / wavelength
 
-        if (method=="Rayleigh"):
-            RayleighFgrad, RayleighFscat = RayleighLimitEval([0,0,zstart],I0,z0,w0,n0,n1,wavelength,radius,onedim=True)
-            Fprev = RayleighFgrad[2]+RayleighFscat[2]
-        elif (method=="LM"):
-            Ftemp = LorenzMieEval(I0,zstart,w0,n0,n1,wavelength,radius,lmax)
-            Fprev = Ftemp[2]
-        elif (method=="Ray"):
-            Ftemp = RayOpticsEval(I0,zstart,w0,n0,n1,wavelength,radius,nphi)
-            Fprev = Ftemp[2]
-
-        maxF = Fprev
-        minF = Fprev
-        f.write("%.5e %.5e " % (radius,w0))
+        data = np.empty((numz,3))
         ipathologic = []
-        for i in range(1,numz):
+
+        for i in range(numz):
+            z = zstart + i*dz
+            if (math.fabs(z) < 1e-10):
+                ipathologic.append(i)
+                continue
+            else:
+                if (method=="Rayleigh"):
+                    RayleighFgrad, RayleighFscat = RayleighLimitEval([0,0,z],I0,z0,w0,n0,n1,wavelength,radius,onedim=True)
+                    Fcurrent = RayleighFgrad[2]+RayleighFscat[2]
+                elif (method=="LM"):
+                    Ftemp = LorenzMieEval(I0,z,w0,n0,n1,wavelength,radius,lmax,precomputed=coeffs)
+                    Fcurrent = Ftemp[2]
+                elif (method=="Ray"):
+                    Ftemp = RayOpticsEval(I0,z,w0,n0,n1,wavelength,radius,nphi)
+                    Fcurrent = Ftemp[2]
+                data[i,0] = z
+                data[i,1] = Fcurrent
+
+        data = np.delete(data, ipathologic, axis=0)
+        newlength = np.shape(data)[0]
+        data[0,2] = 0.0
+        for i in range (1,newlength):
+            data[i,2] = integrate.simps(data[:i,1], data[:i,0])
+
+        Fmax = np.max(data[:,1])
+        Fmin = np.min(data[:,1])
+        minlist = signal.argrelextrema(data[:,2], np.less, order=3)
+        lowerbound_min = 1.1
+        maxlist = signal.argrelextrema(data[:,2], np.greater, order=3)
+        lowerbound_max = 1.1
+        if any(map(len, maxlist)):
+            for element in maxlist:
+                if (data[element[0],2] < lowerbound_max):
+                    lowerbound_max = data[element[0],2]
+                    lowerbound_max_pos = data[element[0],0]
+
+        f.write("%.5e %.5e %.8e %.8e" % (radius,w0, Fmax, Fmin))
+        if any(map(len, minlist)):
+            for element in minlist:
+                f.write(" %.6e %.12e" % (data[element[0],0],data[element[0],2]))
+                print("w0 = %e found %d local minima, %d maxima." % (w0, len(minlist), len(maxlist)))
+                if (data[element[0],2] < lowerbound_min):
+                    lowerbound_min = data[element[0],2]
+                    lowerbound_min_pos = data[element[0],0]
+        else:
+            print("w0 = %e found 0 local minima." % (w0))
+
+        if (lowerbound_max < 1 and lowerbound_min < lowerbound_max):
+            welldepth = (lowerbound_max - lowerbound_min)/4.11433402e-21    #give well depth in units of kT
+            fwells.write("%.5e %.5e %.6e %.6e %.6e %.6e %.6e\n" % (radius,w0, lowerbound_min_pos, lowerbound_max_pos, lowerbound_min, lowerbound_max, welldepth))
+        else:
+            fwells.write("%.5e %.5e 0.0 0.0 0.0 0.0 0.0\n" % (radius,w0))
+
+        f.write("\n")
+
+    f.close()
+    fwells.close()
+    return True
+
+def zRadiusSlice(zstart,zend,numz,T,I0,z0,w0,n0,n1,wavelength,radiuslist,lmax,nphi,folder="Rezultati/",method="Rayleigh"):
+    #calculates axial force profiles and approximate locations of local minima 
+    #writes everything to file
+
+    dz = (zend-zstart)/numz
+    
+    if (method=="Rayleigh"):
+        f = open(folder+"zeros_Rayleigh_w_%.2f_um_n0_%.2f_n1_%.2f.dat" % (w0*1e6,n0,n1),"a+")
+        fwells = open(folder+"welldepths_Rayleigh_w_%.2f_um_n0_%.2f_n1_%.2f.dat" % (w0*1e6,n0,n1),"a+")
+    elif (method=="LM"):
+        f = open(folder+"zeros_LM_w_%.2f_um_n0_%.2f_n1_%.2f.dat" % (w0*1e6,n0,n1),"a+")
+        fwells = open(folder+"welldepths_LM_w_%.2f_um_n0_%.2f_n1_%.2f.dat" % (w0*1e6,n0,n1),"a+")
+        #only valid for variation of beam waist, not radius!
+        #coeffs = PrecomputeAmplitudes(lmax,n0,n1,wavelength,radius)
+    elif (method=="Ray"):
+        f = open(folder+"zeros_Ray_w_%.2f_um_n0_%.2f_n1_%.2f.dat" % (w0*1e6,n0,n1),"a+")
+        fwells = open(folder+"welldepths_Ray_w_%.2f_um_n0_%.2f_n1_%.2f.dat" % (w0*1e6,n0,n1),"a+")
+    else:
+        return False
+    
+    #compute axial forces for every value of parameter
+    for radius in radiuslist:
+        z0 = math.pi * (w0**2) * n0 / wavelength
+        data = np.empty((numz,3))
+        ipathologic = []
+
+        for i in range(numz):
             z = zstart + i*dz
             if (math.fabs(z) < 1e-10):
                 ipathologic.append(i)
@@ -340,19 +445,48 @@ def zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,fol
                 elif (method=="Ray"):
                     Ftemp = RayOpticsEval(I0,z,w0,n0,n1,wavelength,radius,nphi)
                     Fcurrent = Ftemp[2]
-                
-                if (Fcurrent > maxF):
-                    maxF = Fcurrent
-                elif (Fcurrent < minF):
-                    minF = Fcurrent
-                if ((Fprev > 0 and Fcurrent < 0) or (Fprev < 0 and Fcurrent > 0)):
-                    f.write("%.5e " % ((2*z-dz)/2))
-                Fprev = Fcurrent
-        
-        f.write("%.10e %.10e\n" % (maxF,minF))
-        print("w0 = %e" % (w0))
+                data[i,0] = z
+                data[i,1] = Fcurrent
+
+        data = np.delete(data, ipathologic, axis=0)
+        newlength = np.shape(data)[0]
+        data[0,2] = 0.0
+        for i in range (1,newlength):
+            data[i,2] = integrate.simps(data[:i,1], data[:i,0])
+
+        Fmax = np.max(data[:,1])
+        Fmin = np.min(data[:,1])
+        minlist = signal.argrelextrema(data[:,2], np.less, order=3)
+        lowerbound_min = 1.1
+        maxlist = signal.argrelextrema(data[:,2], np.greater, order=3)
+        lowerbound_max = 1.1
+        if any(map(len, maxlist)):
+            for element in maxlist:
+                if (data[element[0],2] < lowerbound_max):
+                    lowerbound_max = data[element[0],2]
+                    lowerbound_max_pos = data[element[0],0]
+
+        f.write("%.5e %.5e %.8e %.8e" % (radius,w0, Fmax, Fmin))
+        if any(map(len, minlist)):
+            for element in minlist:
+                f.write(" %.6e %.12e" % (data[element[0],0],data[element[0],2]))
+                print("a = %e found %d local minima, %d maxima." % (radius, len(minlist), len(maxlist)))
+                if (data[element[0],2] < lowerbound_min):
+                    lowerbound_min = data[element[0],2]
+                    lowerbound_min_pos = data[element[0],0]
+        else:
+            print("a = %e found 0 local minima." % (radius))
+
+        if (lowerbound_max < 1 and lowerbound_min < lowerbound_max):
+            welldepth = (lowerbound_max - lowerbound_min)/4.11433402e-21    #give well depth in units of kT
+            fwells.write("%.5e %.5e %.6e %.6e %.6e %.6e %.6e\n" % (radius,w0, lowerbound_min_pos, lowerbound_max_pos, lowerbound_min, lowerbound_max, welldepth))
+        else:
+            fwells.write("%.5e %.5e 0.0 0.0 0.0 0.0 0.0\n" % (radius,w0))
+
+        f.write("\n")
 
     f.close()
+    fwells.close()
     return True
 
 def simFT(dt,zlist,T):
@@ -389,8 +523,9 @@ def GaussianE(x,z0, w0, n0, n1, wavelength):
     #return np.real(E_exact), np.imag(E_exact) ,np.real(E_approx), np.imag(E_approx)
     return np.real(E_exact * np.conj(E_exact)), np.imag(E_exact) ,np.real(E_approx * np.conj(E_approx)), np.imag(E_approx)
 
+
 #material parameters
-radius = 10e-6         #particle diameter is 100 nm
+radius = 5e-6         #particle diameter is 100 nm
 eta = 8.9e-4            #dynamic viscosity of water at 25C
 T = 298
 n0 = 1.33               #refractive index of surrounding medium
@@ -402,18 +537,15 @@ rhoparticle = 2.65      #silica
 wavelength = 1064e-9    #standard infrared Nd:YAG
 w0 = 0.5e-6             #beam waist radius
 z0 = math.pi * (w0**2) * n0 / wavelength
-#P = 0.0
+#P = 0.0                #test code validity without beam
 P = 0.1                 #100 mW
-#P = 1e-6             #for ray optics
-I0 = 2*P/(math.pi * (w0**2))
-#I0 = 3e12               #approximately 80 mW power for 0.5 micron waist
-#I0 = 0.0                #test code validity without beam
+I0 = 2*P/(math.pi * (w0**2))             
 
 #simulation parameters
-dt = 1e-3
-tmax = 10.0
+dt = 1e-4
+tmax = 1.0
 FourierNreps = 10
-lmax = 200
+lmax = 100
 nphi = 75
 #random.seed(1)          #if we wish for Brownian motion to be repeatable
 
@@ -422,11 +554,11 @@ Brownconst = math.sqrt(2 * constants.Boltzmann * T * dt / D)
 momentum = n1 * constants.h / wavelength
 
 #Simulation and their Fourier transforms
-r0 = [0.0,0.0,0e-6]
+r0 = [0.0,0.0,0e-6] #particle starts out in beam waist
 F = [0.0,0.0,0.0]
 
-""" #Rayleigh
-multipliers = open("Rezultati/Rayleigh_P2e-2_dt_%.2e.dat" % (dt),"w+")
+#Rayleigh
+""" multipliers = open("Rezultati/Rayleigh_P1e-2_dt_%.2e.dat" % (dt),"w+")
 multipliers.write(f"# radius {radius:.3e} eta {eta:.2e} T {T:d} n0 {n0:.2f} n1 {n1:.2f} rhomedium {rhomedium:.2f} rhoparticle {rhoparticle:.2f}\n")
 multipliers.write(f"# lambda {wavelength:.4e} w0 {w0:.2e} z0 {z0:.3e} I0 {I0:.2e}\n\n")
 
@@ -440,27 +572,26 @@ while(t < tmax):
     t += dt
 multipliers.close() """
 
-""" #LM
-multipliers = open("Rezultati/LM_P4e-2_dt_%.2e.dat" % (dt),"w+")
+#LM
+""" multipliers = open("Rezultati/LM_500mm_P1e-1_dt_%.2e.dat" % (dt),"w+")
 multipliers.write(f"# radius {radius:.3e} eta {eta:.2e} T {T:d} n0 {n0:.2f} n1 {n1:.2f} rhomedium {rhomedium:.2f} rhoparticle {rhoparticle:.2f}\n")
 multipliers.write(f"# lambda {wavelength:.4e} w0 {w0:.2e} z0 {z0:.3e} I0 {I0:.2e}\n\n")
 
+coeffs = PrecomputeAmplitudes(lmax,n0,n1,wavelength,radius)
 t = 0.0
 r = r0
 
 while(t < tmax):
     multipliers.write(f"{t:.5f} {r[2]:.12f} {F[2]:.6e}\n")
-    F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax)
+    F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax, precomputed=coeffs)
     r = np.add(r,dr)
     t += dt
 multipliers.close() """
 
-
-""" #ray optics approx.
-multipliers = open("Rezultati/Rayoptics_P1e-7_dt_%.2e.dat" % (dt),"w+")
+#ray optics approx.
+""" multipliers = open("Rezultati/Rayoptics_a5um_P1e-1_dt_%.2e.dat" % (dt),"w+")
 multipliers.write(f"# radius {radius:.3e} eta {eta:.2e} T {T:d} n0 {n0:.2f} n1 {n1:.2f} rhomedium {rhomedium:.2f} rhoparticle {rhoparticle:.2f}\n")
 multipliers.write(f"# lambda {wavelength:.4e} w0 {w0:.2e} z0 {z0:.3e} I0 {I0:.2e}\n\n")
-fileslice = open("Rezultati/zslice_comparison_a_%.2f_um_waist_%.2f_um_.dat" % (radius*1e6,w0*1e6),"w+")
 
 t = 0.0
 r = r0
@@ -470,7 +601,7 @@ while(t < tmax):
     F, dr = UpdatePositionRayOptics(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, nphi)
     r = np.add(r,dr)
     t += dt
-    print("%.4f" % (t))
+    #print("%.4f" % (t))
 
 multipliers.close() """
 
@@ -478,13 +609,14 @@ multipliers.close() """
 """ t = 0.0
 r = r0
 zpositions = []
+coeffs = PrecomputeAmplitudes(lmax,n0,n1,wavelength,radius) #LM only
 #1st run is separate
 while(t < tmax):
     #F, dr = UpdatePosition(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt,onedim=True)
-    F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax)
+    F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax, precomputed=coeffs)
     #F, dr = UpdatePositionRayOptics(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, nphi)
     r = np.add(r,dr)
-    if (t > 0.2*tmax):  #"burn-in" to make sure particle starts out near equilibrium position 
+    if (t > 0.2*tmax):  #"burn-in" to make sure particle starts out near equilibrium position
         zpositions.append(r[2])
     t += dt
 
@@ -501,7 +633,7 @@ for i in range(1,FourierNreps):
     zrep = []
     while(t < tmax):
         #F, dr = UpdatePosition(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt,onedim=True)
-        F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax)
+        F, dr = UpdatePositionLM(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, lmax, precomputed=coeffs)
         #F, dr = UpdatePositionRayOptics(r, I0, z0, w0, n0, n1, wavelength, radius, rhomedium, rhoparticle, D, Brownconst, t, dt, nphi)
         r = np.add(r,dr)
         if (t > 0.2*tmax):
@@ -526,7 +658,7 @@ fourier.close() """
 
 """ zFT = np.true_divide(zFT,FourierNreps)
 freqs = fft.rfftfreq(n,dt)
-fourier = open("Rezultati/LM_dt_%.2e_radius_%.2e_w0_%.2e_1dim_FT.dat" % (dt,radius,w0),"w+")
+fourier = open("Rezultati/LM_P1e0_dt_%.2e_radius_%.2e_w0_%.2e_1dim_FT.dat" % (dt,radius,w0),"w+")
 for i in range(len(freqs)):
     fourier.write("%f %.10e\n" % (freqs[i],zFT[i]))
 fourier.close() """
@@ -553,29 +685,39 @@ uncertainty = trapcoeff * (popterror[0]+popterror[1])
 print("%.6e %.6e" % (trapcoeff,uncertainty)) """
 
 #Here we generate force profiles along the z-axis in a sample trap for all 3 approaches.
-zstart = -100e-6
-zend = 100e-6
-numz = 5001
+""" zstart = -200e-6
+zend = 200e-6
+numz = 15001
 
 forces = zForceSlice(zstart,zend,numz,I0,z0,w0,n0,n1,wavelength,radius,lmax,nphi)
-fileslice = open("Rezultati/zslice_comparison_a_%.2f_um_waist_%.2f_um.dat" % (radius*1e6,w0*1e6),"w+")
+fileslice = open("Rezultati/test_zslice_comparison_a_%.2f_um_waist_%.2f_um.dat" % (radius*1e6,w0*1e6),"w+")
 fileslice.write(f"# radius {radius:.3e} I0 {I0:.5f} n0 {n0:.2f} n1 {n1:.2f} LM: lmax {lmax:d} Ray: nphi {nphi:d}\n")
 np.savetxt(fileslice, forces)
-fileslice.close()
+fileslice.close() """
 
 #checks locations of equilibria for a range of waist diameters
-""" wlist = []
-for w in range(30,50):
+wlist = []
+for w in range(50,60):
     wlist.append(w*0.1*1e-6)
-zstart = -100e-6
-zend = 100e-6
-numz = 5001
-zPosSlice(zstart,zend,numz,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,"Rezultati/","Ray") """
+zstart = -300e-6
+zend = 300e-6
+numz = 30001
+zParSlice(zstart,zend,numz,T,I0,z0,wlist,n0,n1,wavelength,radius,lmax,nphi,"Rezultati/","Ray")
+
+#...and particle sizes
+""" alist = []
+for a in range(1,2):
+    alist.append(a*0.1*1e-6)
+zstart = -50e-6
+zend = 50e-6
+numz = 30001
+zRadiusSlice(zstart,zend,numz,T,I0,z0,w0,n0,n1,wavelength,alist,lmax,nphi,"Rezultati/","LM") """
 
 ###################################
 #testing functions below this point
 ###################################
 
+#Make sure fields of both analytic Gaussian beam and "approximation" agree 
 """ fileEfield = open("Rezultati/Gaussianbeamfieldcomp.dat","w+")
 for i in range(-5000,5001):
     Eexactreal,Eexactimag,Eapproxreal,Eapproximag = GaussianE(i*1e-8,z0, w0, n0, n1, wavelength)
@@ -584,16 +726,16 @@ fileEfield.close() """
 
 #Force components of single incoming ray
 """ filesingleray = open("Rezultati/single_ray_n1_%.2f_n0_%.2f.dat" % (n1,n0),"w+")
-for i in range(0,181):
-    Fz,Fy = SingleRayForce(math.radians(i/2),n0,n1,1.0)
+for i in range(0,361):
+    Fz,Fy = SingleRayForce(math.radians(i/4),n0,n1,1.0)
     filesingleray.write("%f %.10e %.10e\n" % (i/2,Fz,Fy))
 filesingleray.close() """
 
-#Check of field gradient
+#Check of field gradient for Gaussian beam
 """ zstart = -10e-6
 zend = 10e-6
 numz = 2000
-r = 0.4e-6
+r = 1e-6
 dz = (zend-zstart)/numz
 filegradtest = open("Rezultati/beam_intensity_gradient_w0_%.3f_radial_%.3f.dat" % (w0*1e6,r*1e6),"w+")
 filegradtest.write(f"# radius {radius:.4e} w0 {w0:.2e}\n\n")
@@ -603,7 +745,7 @@ for i in range(numz):
 filegradtest.close() """
 
 #Check of annular power distribution
-""" z = 1e-6
+""" z = 20e-6
 
 divangle = wavelength / (math.pi * w0)
 if (math.fabs(z) / radius <= 1.0):
@@ -637,7 +779,7 @@ for i in range(numz):
 fileannulustest.close() """
 
 #Check of angular force distribution
-""" nphi = 5
+""" nphi = 100
 zoffset = -radius*2.0
 divangle = wavelength / (math.pi * w0)
 if (math.fabs(zoffset) / radius <= 1.0):
@@ -666,7 +808,7 @@ fileannulusdisttest.close() """
 
 #Check of LM coefficients
 """ lmax = 100
-zoffset = -1e-6
+zoffset = -0.1e-6
 fileLMtest = open("Rezultati/LM_terms_distriution_w0_%.3f_radius_%.3f_offset_%.3f_n1_%2f.dat" % (w0*1e6,radius*1e6,zoffset*1e6,n1),"w+")
 coeffsum = 0.0
 for l in range(1,lmax+1):
