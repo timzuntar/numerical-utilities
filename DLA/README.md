@@ -3,8 +3,8 @@ Very simple random walk model of 2D diffusion-limited aggregation. A "seed" with
 <figure>
   <img
   src="https://github.com/timzuntar/numerical-utilities/blob/master/DLA/cluster6-6000pts.png?raw=true"
-  alt="DLA aggregate">
-  width="350"
+  alt="DLA aggregate"
+  width="350">
   <figcaption>Example of a generated aggregate</figcaption>
 </figure>
 
@@ -13,8 +13,8 @@ You can track the aggregates' radii of gyration and density correlations, howeve
 <figure>
   <img
   src="https://github.com/timzuntar/numerical-utilities/blob/master/DLA/cluster_density_correlations.png?raw=true"
-  alt="Dimension fit">
-  width="500"
+  alt="Dimension fit"
+  width="500">
   <figcaption>An average over 4 clusters gives D = 1.609 +/- 0.005, but fit is poor for larger values</figcaption>
 </figure>
 

@@ -5,16 +5,16 @@ Its purpose was to determine whether signal from an embedded element corresponds
 <figure>
   <img
   src="https://github.com/timzuntar/numerical-utilities/blob/master/MRI_measurement_fitting/sample_edge_fit.png?raw=true"
-  alt="Signal falloff">
-  width="500"
+  alt="Signal falloff"
+  width="500">
   <figcaption>Signal falloff at the trailing edge of a thick layer. Information about the sample has been removed for anonymity</figcaption>
 </figure>
 
 <figure>
   <img
   src="https://github.com/timzuntar/numerical-utilities/blob/master/MRI_measurement_fitting/sample_monolayer_fit.png?raw=true"
-  alt="Monolayer fit">
-  width="500"
+  alt="Monolayer fit"
+  width="500">
   <figcaption>Sample comparison of included models</figcaption>
 </figure>
 
