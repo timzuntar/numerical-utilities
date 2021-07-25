@@ -11,7 +11,7 @@ def Timestep(C_current,cmin,dt0):
         return dt0
 
 def RasterToConcentration(C_current,raster,Nx,Ny,c0):
-    #255 goes to 1, 0 goes to 0
+    #a value of 0 -> no adsorption, 255 -> equilibrium adsorbed concentration
     for i in range(0,Nx):
         for j in range(0,Ny):
             C_current[i,j] = c0*(raster[j,i]/255.0)
@@ -72,7 +72,7 @@ def CompareSignals(measurement_times,simulation_times,simulation_concs):
 
 #the average unadsorbed area is a fraction of a millimeter across- one micron resolution should be fine enough to capture details,
 #but short enough that computation time remains bearable
-hlateral = 4e-6 #resolution of ellipC_next = np.empty((Nx,Ny))someter images is around 1 micron/pixel. 4x reduced resolution -> 4 microns/pixel
+hlateral = 4e-6 #resolution of ellipsometry images is around 1 micron/pixel. 4x reduced resolution -> 4 microns/pixel
 hz = 4e-6
 dV = (hlateral**2)*hz
 c0 = 1e-6*(hlateral**2) #1 mg/square meter
@@ -80,12 +80,12 @@ c0 = 1e-6*(hlateral**2) #1 mg/square meter
 dt0 = 0.01  #10 ms
 t = 0.0
 
-ke = 3.0/c0
-D = 4e-11   #for a start
+ke = 1.0/c0
+D = 4e-11   #rough approximation
 Rprime = 1e5
 a = 0.25
 
-cb = 3e-5    #boundary concentration; 0.03 mg/mL
+cb = 3e-5    #boundary concentration (in kg/L)
 cmin = 0.99*c0    #stop iterating when every surface cell surpasses this concentration 
 
 raster = imread("exampleraster.png",0)
@@ -98,7 +98,7 @@ print("Full size of array is %d, %d, %d" % (Nx,Ny,Nz))
 V_current = np.full((Nx,Ny,Nz),cb)
 V_next = np.empty((Nx,Ny,Nz))
 
-C_current = np.empty((Nx,Ny))   #surface concentrations. Assumed to be a monolayer
+C_current = np.empty((Nx,Ny))   #surface concentrations
 C_next = np.empty((Nx,Ny))
 C_current = RasterToConcentration(C_current,raster,Nx,Ny,c0)
 simulation_concs = []
@@ -120,7 +120,7 @@ np.savetxt("testoutput.txt",np.transpose(np.vstack((simulation_times,simulation_
 #The approach is roughly as follows: sample/air interfaces are presented as a 2D grid, the bulk as a 3D grid;
 #each cell has its own adsorbed concentration ranging from 0 to 1 (saturated).
 #A cell which borders cells with high surface concentration is more likely to adsorb additional molecules, so in the event of a rupture the film
-#regrowth is not entirely homogeneous. We represent this by a modified Kisliuk isotherm, also considering neighboring cells with a weighing parameter.
+#regrowth is not entirely homogeneous. This is represented by a modified Kisliuk isotherm, also considering neighboring cells with a weighing parameter.
 #Stopping condition for the simulation is concentrations in each surface cell surpassing a specified minimum limit.
 #We define a ROI for space-averaging of data; a single curve is obtained.
 #The curve is then fitted against experimental data. Ideally, the ROIs should be as similar as possible.
