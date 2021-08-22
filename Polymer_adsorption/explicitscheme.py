@@ -1,5 +1,5 @@
 import math
-import ray
+import os
 from cv2 import imread 
 from numba import njit
 import numpy as np
@@ -108,23 +108,33 @@ def ExtractROIAverage(C_current,t,simulation_concs,simulation_times,ROI_bounds):
     simulation_concs.append(sum)
     simulation_times.append(t)
 
-def CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,c0):
+def CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay,fulloutput):
     #Intensity is assumed to vary with square of concentration.
-    signal = np.array(simulation_concs)
-    signal /= c0
-    func_sim = interpolate.interp1d(simulation_times,np.square(signal),fill_value="extrapolate")
+    measurement_times += time_delay #move measurement data to proper delay
+    simulation_concs = (simulation_concs-init_conc)/(c0-init_conc)  #initial normalisation
+    signal = np.square(np.array(simulation_concs))  #concentrations to signal
+
+    func_sim = interpolate.interp1d(simulation_times,signal,fill_value="extrapolate")
     interpolated_concs = func_sim(measurement_times)
+    start_conc = func_sim(time_delay)   #find simulated concentration at ROI definition
+    measurement_concs = measurement_concs*(1.0-start_conc) + start_conc    #squash measurement to proper signal range
+
     N = len(measurement_times)
     MSD = 0.0
     for n in range(0,N):
         MSD += (interpolated_concs[n] - measurement_concs[n])**2
     MSD /= N
-    return MSD
+    if (fulloutput == False):
+        return 1e6*MSD
+    else:
+        return 1e6*MSD,signal,simulation_times,measurement_concs,measurement_times
 
-def SingleRun(x,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,ROI_bounds,a,fulloutput):
-    ke = x[0]
+def SingleRun(x,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,time_delay,ROI_bounds,a,fulloutput,D):
+    ke = x[0]*1e4
     Rprime = x[1]
-    D = x[2]*1e-12
+    #Rprime = x[0]  #1-parameter minimization
+    #D = x[2]*1e-12 #3-parameter minimization
+    D *= 1e-12
     t = 0.0
 
     V_current = np.full((Nx,Ny,Nz),cb)
@@ -137,35 +147,42 @@ def SingleRun(x,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,N
     printcounter = 0
 
     while(C_current.min() <= cmin):
-        if (t > 200.0):
+        if (t > 10.0/cb):
+            print("Run terminated at t = %f. Max. time exceeded." % t)
             if (fulloutput == True):
-                return 1e6*CompareSignals(measurement_times,measurement_concs,simulation_times,(simulation_concs-init_conc)*c0/(c0-init_conc),c0), simulation_concs, simulation_times
+                #return CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay), simulation_concs, simulation_times
+                return CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay,True)
             else:
-                return 1e6*CompareSignals(measurement_times,measurement_concs,simulation_times,(simulation_concs-init_conc)*c0/(c0-init_conc),c0)
+                return CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay,False)
         dt = Timestep(C_current,cmin,dt0)
         C_next,V_current = AdsorptionRateModifier(C_current,C_next,V_current,Nx,Ny,hz,dt,c0,Rprime,ke,a)
 
         V_next,pathological = IterateTimeStep(V_current,V_next,D,Nx,Ny,Nz,dt,hlateral,hz,cb,c0)
 
         if (pathological == True):
+            print("Run terminated at t = %f. Negative concentration value encountered." % t)
             if (fulloutput == True):
                 return 1e6,[],[]
             else:
                 return 1e6
-
-        if (printcounter >= 100):    
+        
+        if (printcounter >= 200):    
             print(t,C_current.min())
             printcounter = 0
+        
 
         np.copyto(C_current, C_next)
         np.copyto(V_current, V_next)
         t += dt
         printcounter += 1
         ExtractROIAverage(C_current,t,simulation_concs,simulation_times,ROI_bounds)
+
+    print("Run finished at t = %f." % t)
     if (fulloutput == True):
-        return 1e6*CompareSignals(measurement_times,measurement_concs,simulation_times,(simulation_concs-init_conc)*c0/(c0-init_conc),c0), (simulation_concs-init_conc)*c0/(c0-init_conc), simulation_times
+        #return CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay), (simulation_concs-init_conc)*c0/(c0-init_conc), simulation_times
+        return CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay,True)
     else:
-        return 1e6*CompareSignals(measurement_times,measurement_concs,simulation_times,(simulation_concs-init_conc)*c0/(c0-init_conc),c0)
+        return CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,init_conc,c0,time_delay,False)
 
 @njit(parallel=True)
 def IterateTimeStepMain(V_next,V_current,D,zslice_height,Nx,Ny,Nz,dt,hlateral,hz,cb,c0,num_cpus):
@@ -191,7 +208,8 @@ def IterateTimeStepMain(V_next,V_current,D,zslice_height,Nx,Ny,Nz,dt,hlateral,hz
     return V_next,pathological
 
 def SingleRunParallelised(x,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,ROI_bounds,a,num_cpus,fulloutput):
-    ke = x[0]
+    #DEPRECATED!
+    ke = x[0]*1e4
     Rprime = x[1]
     D = x[2]*1e-12
     t = 0.0
@@ -208,7 +226,7 @@ def SingleRunParallelised(x,V_next,C_next,raster,measurement_times,measurement_c
     printcounter = 0
 
     while(C_current.min() <= cmin):
-        if (t > 200.0):
+        if (t > 1000.0):
             if (fulloutput == True):
                 return 1e6*CompareSignals(measurement_times,measurement_concs,simulation_times,(simulation_concs-init_conc)*c0/(c0-init_conc),c0), simulation_concs, simulation_times
             else:
@@ -224,7 +242,7 @@ def SingleRunParallelised(x,V_next,C_next,raster,measurement_times,measurement_c
             else:
                 return 1e6
 
-        if (printcounter >= 100):    
+        if (printcounter >= 200):    
             print(t,C_current.min())
             printcounter = 0
 
@@ -240,55 +258,84 @@ def SingleRunParallelised(x,V_next,C_next,raster,measurement_times,measurement_c
         return 1e6*CompareSignals(measurement_times,measurement_concs,simulation_times,simulation_concs,c0)
 
 #the average size of unadsorbed areas is around 100 microns
-hlateral = 4.4e-6 #resolution of ellipsometry images is around 1.1 micron/pixel. 4x reduced resolution -> 4.4 microns/pixel
+hlateral = 4.4e-6 #resolution of images is around 1.1 micron/pixel. 4x reduced resolution -> 4.4 microns/pixel
 hz = 4.4e-6 #cube grid
-c0 = 0.81e-6 #1 mg/m^2
+c0 = 0.81e-6 #around 1 mg/m^2
 
-dt0 = 0.1
+inputs = np.genfromtxt("sample_inputtable.dat",dtype=("|S31", "|S39", float, float, float, float, float, float, int, int, int, int, float))
+print(inputs.shape)
+if len(inputs.shape) == 0:
+    inputs = np.array([inputs])
 
-#Initial parameter choice
-ke = 59.99994897
-Rprime = 7.34286459
-a = 0.0 #neighbour weighing parameter. A value of 0.25 weighs the sum of neighbors equally to the central cell
-D = 8.15165628 #the actual value is D*1e-12, but such a discrepancy in values messes with the minimization algorithm
+for i in range(np.shape(inputs)[0]):
+    dt0 = inputs[i][2]
+    time_delay = inputs[i][12]
 
-initguess = [ke,Rprime,D]
-parameterbounds = ((0.0,1e+2),(1.0,1.5e+3),(5.0,15.0))
+    #Initial parameter choice
+    ke = inputs[i][5]
+    #ke = 0.0
+    Rprime = inputs[i][6]
+    a = 0.0 #neighbour weighing parameter. A value of 0.25 weighs the sum of neighbors equally to the central cell
+    #D = inputs[i][7] #the actual value is D*1e-12, but such a discrepancy in values messes with the minimization algorithm
+    D = 7.0
 
-cb = 3e-2    #boundary concentration (in kg/m^3)
-cmin = 0.995*c0    #stop iterating when every surface cell surpasses this concentration 
+    #initguess = [ke,Rprime,D]  #3-parameter model
+    #parameterbounds = ((0.0,1e+3),(0.1,3e1),(5.0,60.0))
+    initguess = [ke,Rprime] #2-parameter
+    parameterbounds = ((0.0,5e+3),(0.01,1e3))
+    #initguess = [Rprime]   #1-parameter
+    #parameterbounds = ((0.01,1e2),)
 
-raster = imread("examplerasterROI1.png",0)
-Ny,Nx = raster.shape
-Nz = int(min(Nx,Ny)*hlateral/hz)
-ROI_bounds = (53,31,59,36)  #ROI1
-#ROI_bounds = (30,31,50,44)    #ROI0
-print("Full size of array is %d, %d, %d. Starting simulation..." % (Nx,Ny,Nz))
+    cb = inputs[i][4]    #boundary concentration (in kg/m^3)
+    cmin = inputs[i][3]*c0    #stop iterating when every surface cell surpasses this concentration 
 
-out = np.loadtxt("data/exampleinputROI1.txt")
-out = out[np.where(out[range(out.shape[0]),1] < 0.98)]
-measurement_times = out[:,0]
-measurement_concs = out[:,1]
-#measurement points with c > cmin need to be removed, otherwise interpolation will fail
+    raster = imread("input-rasters/" + inputs[i][1].decode("utf-8"),0)
+    Ny,Nx = raster.shape
+    Nz = int(min(Nx,Ny)*hlateral/hz)
 
-V_next = np.empty((Nx,Ny,Nz),dtype="float64")
-C_next = np.empty((Nx,Ny), dtype="float64")
-"""
-godobject = (V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,ROI_bounds,a,False)
+    ROI_bounds = (inputs[i][8],inputs[i][9],inputs[i][10],inputs[i][11])
 
-optimized = optimize.minimize(SingleRun,initguess,bounds=parameterbounds,args=godobject,method="L-BFGS-B",options={"disp": True})
-print(optimized.x)
-initguess = optimized.x
-"""
-MSD, simulation_concs, simulation_times = SingleRun(initguess,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,ROI_bounds,a,True)
-#MSD, simulation_concs, simulation_times = SingleRunParallelised(initguess,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,ROI_bounds,a,num_cpus,True)
+    print("Full size of array is %d, %d, %d. Starting simulation..." % (Nx,Ny,Nz))
 
-print("Mean squared difference = %f" % (MSD))
-signal = np.array(simulation_concs)
-signal /= c0
-outstring = "data/ROI1_optimized_%dpar_ke_%.3e_R_%.3e_a_%.3e_D_%.3e_dt0_%.2f.txt" % (len(initguess),initguess[0],initguess[1],a,initguess[2]*1e-12,dt0)
-np.savetxt(outstring,np.transpose(np.vstack((simulation_times,np.square(signal)))))
+    out = np.loadtxt("input-signals/" + inputs[i][0].decode("utf-8"))
+    out = out[np.where(out[range(out.shape[0]),1] < inputs[0][3]**2 - 0.001)]
+    measurement_times = out[:,0]
+    measurement_concs = out[:,1]
+    #measurement points with c > cmin need to be removed, otherwise interpolation may fail
 
-results = open("data/parameter_output.txt","a")
-results.write("exampleinputROI1 MSD %.3f dt %.3f cb %.3e hlateral %.2e c0 %.3e ke %.5e R %.5e a %.5e D %.5e\n" % (MSD,dt0,cb,hlateral,c0,initguess[0],initguess[1],a,initguess[2]*1e-12))
-results.close()
+    V_next = np.empty((Nx,Ny,Nz),dtype="float64")
+    C_next = np.empty((Nx,Ny), dtype="float64")
+
+    #if the next 4 lines are commented out, minimization is not performed
+    #instead, the simulation is carried out at parameter values included in the input table
+    #this is useful if you wish to tweak something by hand
+    """
+    godobject = (V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,time_delay,ROI_bounds,a,False,D)
+    optimized = optimize.minimize(SingleRun,initguess,bounds=parameterbounds,args=godobject,method="L-BFGS-B",options={"disp": True})
+    print(optimized.x)
+    initguess = optimized.x
+    """
+
+    #choose one of these based on the number of parameters you are fitting for
+    #MSD, simulation_concs, simulation_times = SingleRun(initguess,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,time_delay,ROI_bounds,a,True,D)
+    MSD, simulation_concs, simulation_times, measurement_concs,measurement_times = SingleRun(initguess,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,time_delay,ROI_bounds,a,True,D)
+    #MSD, simulation_concs, simulation_times = SingleRunParallelised(initguess,V_next,C_next,raster,measurement_times,measurement_concs,Nx,Ny,Nz,c0,cb,cmin,hlateral,hz,dt0,ROI_bounds,a,num_cpus,True)
+
+    print("Mean squared difference = %f" % (MSD))
+    signal = np.array(simulation_concs)
+    signal /= c0
+    #same concept here...
+    #outstring = "output-data/" + os.path.splitext(inputs[i][0].decode("utf-8"))[0] + "ke_%.3e_R_%.3e_D_%.3e_dt0_%.2f.txt" % (initguess[0]*1e4,initguess[1],initguess[2]*1e-12,dt0)
+    outstring = "output-data/" + os.path.splitext(inputs[i][0].decode("utf-8"))[0] + "ke_%.3e_R_%.3e_D_%.3e_dt0_%.2f.txt" % (initguess[0]*1e4,initguess[1],D*1e-12,dt0)
+    #outstring = "output-data/" + os.path.splitext(inputs[i][0].decode("utf-8"))[0] + "ke_%.3e_R_%.3e_D_%.3e_dt0_%.2f.txt" % (ke,initguess[0],D*1e-12,dt0)
+    #...and here.
+    #np.savetxt(outstring,np.transpose(np.vstack((simulation_times,np.square(signal)))))
+    np.savetxt(outstring,np.transpose(np.vstack((simulation_times,simulation_concs))))
+    #np.savetxt(outstring+"b",np.transpose(np.vstack((measurement_times,measurement_concs))))
+    
+    
+    results = open("output-data/parameter_output_fixedD.txt","a")
+    #results.write(os.path.splitext(inputs[i][0].decode("utf-8"))[0] + " MSD %.3f dt %.3f cb %.3e hlateral %.2e c0 %.3e ke %.5e R %.5e D %.5e\n" % (MSD,dt0,cb,hlateral,c0,initguess[0]*1e4,initguess[1],initguess[2]*1e-12))
+    results.write(os.path.splitext(inputs[i][0].decode("utf-8"))[0] + " MSD %.3f dt %.3f cb %.3e hlateral %.2e c0 %.3e ke %.5e R %.5e D %.5e\n" % (MSD,dt0,cb,hlateral,c0,initguess[0]*1e4,initguess[1],D*1e-12))
+    #results.write(os.path.splitext(inputs[i][0].decode("utf-8"))[0] + " MSD %.3f dt %.3f cb %.3e hlateral %.2e c0 %.3e ke %.5e R %.5e D %.5e\n" % (MSD,dt0,cb,hlateral,c0,ke,initguess[0],D*1e-12))
+    results.close()
