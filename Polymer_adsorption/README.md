@@ -10,7 +10,7 @@ In the first part of each timestep, a modified precursor-mediated (Kisliuk) adso
 
 ![](https://github.com/timzuntar/numerical-utilities/blob/master/Polymer_adsorption/figures/adsorption_rate.png?raw=true)
 
-These depend both on the adsorptipn coefficient R and on a "cooperation parameter" k<sub>e</sub>; a positive value of k<sub>e</sub> means that molecules preferentially adsorb to sites with previously adsorbed molecules, mimicking favourable intermolecular interactions in their adsorbed state. This means that replacement of a ruptured adsorbed layer is not entirely homogeneous even after accounting for differences in diffusion rates - the rupture will fill from the outside in.
+These depend both on the adsorption coefficient R and on a "cooperation parameter" k<sub>e</sub>; a positive value of k<sub>e</sub> means that molecules preferentially adsorb to sites with previously adsorbed molecules, mimicking favourable intermolecular interactions in their adsorbed state. This means that replacement of a ruptured adsorbed layer is not entirely homogeneous even after accounting for differences in diffusion rates - the rupture will fill from the outside in.
 
 In the second part, the diffusion process within the solution is simulated:
 
