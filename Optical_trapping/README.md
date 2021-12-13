@@ -36,12 +36,14 @@ If its diameter a is much smaller than the wavelength of light, the particle can
 
 On the other hand, if a >> λ, the beam can be thought of as consisting of rays which reflect off and diffract through it, imparting a change in momentum in the process. In the on-axis case, light from each infinitesimally narrow annulus contacts the particle at the same angle:
 
-![Geometry in the ray optics regime](https://github.com/timzuntar/numerical-utilities/blob/master/Optical_trapping/figures/rayoptics_diagram.png?raw=true)
+[Diagram of geometry in the ray optics regime.](https://github.com/timzuntar/numerical-utilities/blob/master/Optical_trapping/figures/rayoptics_diagram.png?raw=true)
 
 Some lines of trigonometry later, we get the following equations
 
 ![](https://github.com/timzuntar/numerical-utilities/blob/master/Optical_trapping/figures/geometric_Fz.png?raw=true)
+
 ![](https://github.com/timzuntar/numerical-utilities/blob/master/Optical_trapping/figures/geometric_Fax.png?raw=true)
+
 ![](https://github.com/timzuntar/numerical-utilities/blob/master/Optical_trapping/figures/geometric_Ftot.png?raw=true)
 
 T and R are the Fresnel transmission and reflection coefficients, while dP represents an infinitesimal amount of optical power associated with the ray. How much is the total force? While I am sure that the equations are somehow integrable, I did not bother with attempting. Instead, the beam plane is arbitrarily divided into a countable amount of annuli. The power associated with each of them is then assumed to be incident under the same angle. It's not as bad as it sounds - even n=10 gives decent results for low beam divergences.
