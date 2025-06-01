@@ -36,3 +36,8 @@ Fitting of the Mixing-Roughness-Information depth model to experimental secondar
 [Link](https://github.com/timzuntar/numerical-utilities/tree/master/DLA#readme)
 
 2D implementation of a simple diffusion-limited aggregation process and statistical analysis of the aggregates it forms
+
+### Neural network
+[Link](https://github.com/timzuntar/numerical-utilities/tree/master/Neural_net#readme)
+
+A NumPy-only implementation of a primitive classifier neural network working on the MNIST handwritten number dataset for familiarization purposes
