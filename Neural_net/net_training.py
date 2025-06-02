@@ -38,11 +38,23 @@ def check_distribution(datareader):
 
 def cumulant_plot(cumulants,expected_prevalences,scale_to_sqrtn = False):
     # shows the deviation from the expected (perfectly shuffled) distribution of the training data classes
+    fig = plt.figure()
+    ax = fig.add_subplot()
+    
     for i in range(len(expected_prevalences)):
         if scale_to_sqrtn == True:
-            plt.plot(np.arange(len(cumulants[:,i])),(cumulants[:,i]-np.arange(len(cumulants[:,i]))*expected_prevalences[i]/len(cumulants[:,i]))/np.sqrt(np.arange(len(cumulants[:,i]))+1))
+            plt.plot(np.arange(len(cumulants[:,i])),(cumulants[:,i]-np.arange(len(cumulants[:,i]))*expected_prevalences[i]/len(cumulants[:,i]))/np.sqrt(np.arange(len(cumulants[:,i]))+1),label="%d" % i)
         else:
-            plt.plot(np.arange(len(cumulants[:,i])),cumulants[:,i])
+            plt.plot(np.arange(len(cumulants[:,i])),cumulants[:,i],label="%d" % i)
+    
+    plt.title("Class distribution in the training set")
+    plt.xlabel("Cumulative number of training samples")
+    if scale_to_sqrtn == True:
+        plt.ylabel(r"Deviation of class occurences from expectation ($\Delta n / \sqrt{n}$)")
+    else:
+        plt.ylabel("Cumulative occurences of each class")
+
+    plt.legend(loc="lower right")
     plt.show()
     return 0
 
@@ -132,8 +144,9 @@ testing_dataset = "t10k-images-idx3-ubyte"
 testing_labels = "t10k-labels-idx1-ubyte"
 
 cumulants = check_distribution(datareader(training_dataset,training_labels))
-cumulant_plot(cumulants,cumulants[-1,:],scale_to_sqrtn = True)
-
+print(cumulants[-1,:]/60000)
+cumulant_plot(cumulants,cumulants[-1,:],scale_to_sqrtn = False)
+exit()
 # Here, the operator is trusted to not exceed the amount of training data actually included in the database
 training_examples_to_use = 60000
 test_examples_to_use = 100
