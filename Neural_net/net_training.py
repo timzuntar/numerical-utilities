@@ -2,10 +2,11 @@
 Disclaimer: The datareader helper function has been reproduced from work by Yann LeCun.
 """
 
-import sys
-import struct
 import math
+import os
 import pickle
+import struct
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,7 +44,7 @@ def cumulant_plot(cumulants,expected_prevalences,scale_to_sqrtn = False):
     
     for i in range(len(expected_prevalences)):
         if scale_to_sqrtn == True:
-            plt.plot(np.arange(len(cumulants[:,i])),(cumulants[:,i]-np.arange(len(cumulants[:,i]))*expected_prevalences[i]/len(cumulants[:,i]))/np.sqrt(np.arange(len(cumulants[:,i]))+1),label="%d" % i)
+            plt.plot(np.arange(len(cumulants[:,i])),(cumulants[:,i]-np.arange(len(cumulants[:,i]))*expected_prevalences[i]/len(cumulants[:,i]))/np.sqrt(np.arange(len(cumulants[:,i]))+1),label="%d" % i,lw=0.6)
         else:
             plt.plot(np.arange(len(cumulants[:,i])),cumulants[:,i],label="%d" % i)
     
@@ -143,10 +144,10 @@ training_labels = "train-labels-idx1-ubyte"
 testing_dataset = "t10k-images-idx3-ubyte"
 testing_labels = "t10k-labels-idx1-ubyte"
 
-cumulants = check_distribution(datareader(training_dataset,training_labels))
-print(cumulants[-1,:]/60000)
-cumulant_plot(cumulants,cumulants[-1,:],scale_to_sqrtn = False)
-exit()
+#cumulants = check_distribution(datareader(training_dataset,training_labels))
+#print(cumulants[-1,:]/60000)
+#cumulant_plot(cumulants,cumulants[-1,:],scale_to_sqrtn = True)
+
 # Here, the operator is trusted to not exceed the amount of training data actually included in the database
 training_examples_to_use = 60000
 test_examples_to_use = 100
@@ -169,10 +170,17 @@ try:
         error_values = prev_result[6]
         accuracies = prev_result[7]
         max_mismatches = prev_result[8]
+
+        if not os.path.exists("output/"+parameter_set_name+"_E_acc.dat"):
+            np.savetxt("output/"+parameter_set_name+"_E_acc.dat",np.column_stack((error_values,accuracies,max_mismatches)),header="loss function, cumulative accuracy, max. mismatch per element")
+
     else:
         trained_network_exists = False
 except:
     trained_network_exists = False
+
+
+exit()
 
 if trained_network_exists != True:
     # Generates initial random weights
