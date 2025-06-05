@@ -18,4 +18,6 @@ Evidently not all classes are equally common. The digit 1, for example, comes up
 
 Training using the entire data set takes about a minute of real time on my machine. Of course, the code is unoptimized and only running on a single core - it would be interesting to see, for example, what kind of gains in speed a shift to batch gradient descent and parallelization the batches could achieve, but that is beyond the scope of this exercise. Instead, without further ado, the results.
 
-Four different values of the learning rate η spanning from 1e-4 (lowest) to 0.1 (highest) were tested. The instantaneous loss function values (magnitudes of mismatches between the predicted and true answer) and the prediction accuracy of the network so far were continuously recorded.
+Four different values of the learning rate η spanning from 1e-4 (lowest) to 0.1 (highest) were tested. The instantaneous loss function values (magnitudes of mismatches between the predicted and true answer) and the prediction accuracy of the network so far were continuously recorded. The below image of cumulative prediction accuracy of the network clearly shows that the learning rate needs to be carefully selected; both too small and too large values lead to poor results. In the case of too quick learning, the network never stabilizes, while if the value is set too low, we run out of training examples before "convergence".
+
+![](https://github.com/timzuntar/numerical-utilities/blob/master/Neural_net/output/accuracy_progression.png?raw=true)

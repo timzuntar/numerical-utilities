@@ -59,6 +59,34 @@ def cumulant_plot(cumulants,expected_prevalences,scale_to_sqrtn = False):
     plt.show()
     return 0
 
+def training_phase_plot(filenames,qty_values,layer_sizes,qty="error"):
+    # plots the changes in network prediction accuracy over the course of the training phase
+
+    fig = plt.figure()
+    ax = fig.add_subplot()
+
+    if qty == "error":
+        qty_idx = 0
+    elif qty == "accuracy":
+        qty_idx = 1
+    else:
+        print("Bogus input")
+        return 0
+
+    for qty,file in zip(qty_values,filenames):
+        data = np.loadtxt(file,usecols=qty_idx)
+        plt.plot(np.arange(len(data)),data,label="%.4f" % qty)
+
+    plt.xlabel("Cumulative number of training samples")
+    plt.ylabel("Average prediction accuracy")
+
+    if qty_idx == 0:   
+        plt.legend(loc="center right",title=r"$E$")
+    elif qty_idx == 1:
+        plt.legend(loc="center right",title=r"$\eta$")
+    plt.ylim(0.0,1.0)
+    plt.show()
+
 def softmax(weights,vector,bias):
     # activation function between network layers
     return np.tanh(np.matmul(weights,vector)+bias)
@@ -148,6 +176,11 @@ testing_labels = "t10k-labels-idx1-ubyte"
 #print(cumulants[-1,:]/60000)
 #cumulant_plot(cumulants,cumulants[-1,:],scale_to_sqrtn = True)
 
+training_phase_plot(["output/full_slowest_learning_E_acc.dat","output/full_slow_learning_E_acc.dat","output/full_mid_learning_E_acc.dat","output/full_fast_learning_E_acc.dat"],[0.0001,0.001,0.01,0.1],layer_sizes[1:-2],qty="accuracy")
+exit()
+
+#######################################################
+
 # Here, the operator is trusted to not exceed the amount of training data actually included in the database
 training_examples_to_use = 60000
 test_examples_to_use = 100
@@ -170,7 +203,8 @@ try:
         error_values = prev_result[6]
         accuracies = prev_result[7]
         max_mismatches = prev_result[8]
-
+        
+        # Additionally, save the accuracy tracking in a separate file.
         if not os.path.exists("output/"+parameter_set_name+"_E_acc.dat"):
             np.savetxt("output/"+parameter_set_name+"_E_acc.dat",np.column_stack((error_values,accuracies,max_mismatches)),header="loss function, cumulative accuracy, max. mismatch per element")
 
@@ -179,8 +213,6 @@ try:
 except:
     trained_network_exists = False
 
-
-exit()
 
 if trained_network_exists != True:
     # Generates initial random weights
