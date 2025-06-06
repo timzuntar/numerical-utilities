@@ -9,6 +9,7 @@ import struct
 import sys
 
 import matplotlib.pyplot as plt
+from mpl_toolkits.axes_grid1 import ImageGrid
 import numpy as np
 
 
@@ -69,6 +70,8 @@ def training_phase_plot(filenames,qty_values,layer_sizes,qty="error"):
         qty_idx = 0
     elif qty == "accuracy":
         qty_idx = 1
+    elif qty == "maxmismatch":
+        qty_idx = 2
     else:
         print("Bogus input")
         return 0
@@ -84,6 +87,8 @@ def training_phase_plot(filenames,qty_values,layer_sizes,qty="error"):
         plt.legend(loc="center right",title=r"$E$")
     elif qty_idx == 1:
         plt.legend(loc="center right",title=r"$\eta$")
+    elif qty_idx == 2:
+        plt.legend(loc="center right",title=r"$\mathrm{max}_i |E_i|$")
     plt.ylim(0.0,1.0)
     plt.show()
 
@@ -176,8 +181,7 @@ testing_labels = "t10k-labels-idx1-ubyte"
 #print(cumulants[-1,:]/60000)
 #cumulant_plot(cumulants,cumulants[-1,:],scale_to_sqrtn = True)
 
-training_phase_plot(["output/full_slowest_learning_E_acc.dat","output/full_slow_learning_E_acc.dat","output/full_mid_learning_E_acc.dat","output/full_fast_learning_E_acc.dat"],[0.0001,0.001,0.01,0.1],layer_sizes[1:-2],qty="accuracy")
-exit()
+#training_phase_plot(["output/full_slowest_learning_E_acc.dat","output/full_slow_learning_E_acc.dat","output/full_mid_learning_E_acc.dat"],[0.0001,0.001,0.01],layer_sizes[1:-2],qty="error")
 
 #######################################################
 
@@ -273,13 +277,23 @@ if trained_network_exists != True:
 
 print("Training is finished. Testing network...")
 
-""" acceptable_diff = 1.0
+acceptable_diff = 0.6
 max_iters = 10000
-ideal_zero = hallucinate(acceptable_diff,max_iters,image_dimensions,0,learning_rate,weight_matrices,bias_vectors)
 
-plt.imshow(np.reshape(ideal_zero,(28,28)))
+fig = plt.figure(figsize=(12, 5))
+grid = ImageGrid(fig, 111, nrows_ncols = (2, 5), axes_pad=0.1)
+
+features = []
+
+for i in range(10):
+    ideal_number = hallucinate(acceptable_diff,max_iters,image_dimensions,i,learning_rate,weight_matrices,bias_vectors)
+    features.append(np.reshape(ideal_number,(28,28)))
+
+for ax, im in zip(grid, features):
+    ax.imshow(im)
+plt.savefig("output/"+parameter_set_name+"_feature_vis_all.png")
 plt.show()
-exit() """
+exit()
 
 # Testing
 i_am_confusion = np.zeros((10,10))
