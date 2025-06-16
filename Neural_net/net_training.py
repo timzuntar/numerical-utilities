@@ -277,7 +277,7 @@ if trained_network_exists != True:
 
 print("Training is finished. Testing network...")
 
-acceptable_diff = 0.6
+""" acceptable_diff = 0.6
 max_iters = 10000
 
 fig = plt.figure(figsize=(12, 5))
@@ -292,8 +292,7 @@ for i in range(10):
 for ax, im in zip(grid, features):
     ax.imshow(im)
 plt.savefig("output/"+parameter_set_name+"_feature_vis_all.png")
-plt.show()
-exit()
+plt.show() """
 
 # Testing
 i_am_confusion = np.zeros((10,10))

@@ -22,7 +22,8 @@ Four different values of the learning rate η spanning from 1e-4 (lowest) to 0.1
 
 ![](https://github.com/timzuntar/numerical-utilities/blob/master/Neural_net/output/accuracy_progression.png?raw=true)
 
-It is more interesting to look at how the trained networks perform on the testing dataset; keep in mind that the above plots are not really accurate to the instantaneous performance, since poor performance at the start of training drags them down. But before getting to the results, let's use the example of the trained network with learning rate 1e-3 and visualize the features it has been trained to assign the perfect number score to. Numbers from 0-4 are visualized in the top row, 5-9 in the bottom row.
+It is more interesting to look at how the trained networks perform on the testing dataset; keep in mind that the above plots are not really accurate to the instantaneous performance, since poor performance at the start of training drags them down. But before getting to the results, let's use the example of the trained network and visualize the features it assigns the (near-)perfect number score to. In order to achieve that, the network's desired output and learned parameters are kept fixed and an arbitrary input image is introduced as its initial state. The backpropagation steps then act on and change the input image instead of weights and biases, causing it to gradually shift to the input which, given the trained parameters, would minimize the difference to the desired classification. An example of a set of classification-maximizing inputs is shown below.
 
-![](https://github.com/timzuntar/numerical-utilities/blob/master/Neural_net/output/full_slow_learning_feature_vis_all.png?raw=true)
-
+| ![](https://github.com/timzuntar/numerical-utilities/blob/master/Neural_net/output/full_slow_learning_feature_vis_all.png?raw=true) |
+|:--:|
+| Visualization of features corresponding to optimal classification, computed through iterative back-propagation. The top row contains features corresponding to classification as digits 0-4 (in increasing order from left to right); features corresponding to digits 5-9 are contained in the bottom row. The input maps have been generated using the network trained with a learning rate of 1e-3 and a total error acceptance threshold of 0.6/(28 x 28).|
