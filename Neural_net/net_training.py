@@ -187,7 +187,7 @@ testing_labels = "t10k-labels-idx1-ubyte"
 
 # Here, the operator is trusted to not exceed the amount of training data actually included in the database
 training_examples_to_use = 60000
-test_examples_to_use = 100
+test_examples_to_use = 10000
 
 # First, we will check if the network has already learned from these data and parameters
 # If a saved set by the same name already exists, open and compare it
@@ -315,6 +315,12 @@ for i in range(10):
 print(i_am_confusion)
 print(class_numbers)
 
-plt.imshow(i_am_confusion,cmap="Greys")
+plt.imshow(i_am_confusion,cmap="viridis")
+plt.title(r"Error matrix for %d hidden layers and $\eta = $%.0e" % (len(layer_sizes)-2, learning_rate))
+plt.xlabel("Actual class")
+plt.ylabel("Predicted class")
+plt.xticks(np.arange(0,10,1))
+plt.yticks(np.arange(0,10,1))
+plt.colorbar()
 plt.show()
 # evaluation of results, implementation of different hidden layer sizes as well as is to follow.

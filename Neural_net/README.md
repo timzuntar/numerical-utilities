@@ -27,3 +27,7 @@ It is more interesting to look at how the trained networks perform on the testin
 | ![](https://github.com/timzuntar/numerical-utilities/blob/master/Neural_net/output/full_slow_learning_feature_vis_all.png?raw=true) |
 |:--:|
 | Visualization of features corresponding to optimal classification, computed through iterative back-propagation. The top row contains features corresponding to classification as digits 0-4 (in increasing order from left to right); features corresponding to digits 5-9 are contained in the bottom row. The input maps have been generated using the network trained with a learning rate of 1e-3 and a total error acceptance threshold of 0.6/(28 x 28).|
+
+Although some of the patterns resemble digits, the resemblance is vague and it is clear that the network does not perceive them the same way as a human brain. So what accuracy we can expect from a network that has been trained in this way when we let it classify the testing dataset? As it turns out, it is quite good! The error matrix (also known as confusion matrix) is not far off from being diagonal.
+
+![](https://github.com/timzuntar/numerical-utilities/blob/master/Neural_net/output/full_slow_learning_error_map.png?raw=true)
